@@ -1,0 +1,176 @@
+@import "tailwindcss";
+
+/* ── Deep Blue Dark Theme ── */
+:root {
+  color-scheme: dark;
+
+  --bg-app: #060b17;
+  --bg-panel: #0a1224;
+  --bg-card: #111e3a;
+  --bg-card-hover: #152545;
+  --bg-input: #0d1a35;
+  --bg-segment: rgba(18, 30, 58, 0.7);
+  --bg-segment-active: rgba(79, 100, 240, 0.2);
+  --bg-canvas: #060c18;
+  --bg-star: #000000;
+
+  --border-subtle: rgba(30, 55, 100, 0.4);
+  --border-default: rgba(40, 70, 120, 0.5);
+  --border-accent: rgba(80, 100, 220, 0.4);
+
+  --text-primary: #d4dff0;
+  --text-secondary: #8899b8;
+  --text-muted: #506080;
+  --text-accent: #7b93e8;
+  --text-on-accent: #a0b4f0;
+
+  --accent: #5570dd;
+  --accent-dim: rgba(85, 112, 221, 0.12);
+  --accent-glow: rgba(85, 112, 221, 0.35);
+
+  --success: #3dd4a0;
+  --success-dim: rgba(61, 212, 160, 0.12);
+  --success-border: rgba(61, 212, 160, 0.35);
+
+  --danger: #f06060;
+
+  --mask-fill: #d8e0f0;
+  --mask-obstruction: #0a1025;
+  --mask-border: #607098;
+
+  --slider-track: linear-gradient(to right, #1a2a50, #253660);
+  --slider-thumb: linear-gradient(135deg, #6880e0, #5068d0);
+  --slider-thumb-border: #1a2560;
+  --tick-color: rgba(60, 80, 130, 0.45);
+}
+
+body {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+::selection {
+  background: var(--accent-glow);
+}
+
+/* ── Custom Range Slider ── */
+.slider-track {
+  background: var(--slider-track);
+  border: none;
+  outline: none;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.slider-track::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--slider-thumb);
+  border: 2px solid var(--slider-thumb-border);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent-glow);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.slider-track::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 10px var(--accent-glow);
+  transform: scale(1.15);
+}
+
+.slider-track::-webkit-slider-thumb:active {
+  box-shadow: 0 0 14px var(--accent-glow);
+  transform: scale(1.05);
+}
+
+.slider-track::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--slider-thumb);
+  border: 2px solid var(--slider-thumb-border);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.slider-track::-moz-range-track {
+  background: var(--slider-track);
+  border-radius: 2px;
+  height: 4px;
+}
+
+/* ── Scrollbar ── */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--border-default);
+}
+
+/* ── Animations ── */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* ── Resizable Divider ── */
+.divider-handle {
+  width: 6px;
+  cursor: col-resize;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+  position: relative;
+  transition: background-color 0.15s ease;
+  z-index: 20;
+}
+
+.divider-handle:hover,
+.divider-handle:active {
+  background: var(--border-accent);
+}
+
+.divider-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 24px;
+  border-radius: 1px;
+  background: repeating-linear-gradient(to bottom,
+      var(--text-muted) 0px,
+      var(--text-muted) 2px,
+      transparent 2px,
+      transparent 5px);
+  opacity: 0.5;
+}
+
+.divider-handle:hover .divider-grip {
+  opacity: 0.9;
+}
