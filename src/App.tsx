@@ -76,7 +76,7 @@ function App() {
         style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-panel)' }}>
         <h1 className="text-sm font-bold tracking-tight"
           style={{ color: 'var(--text-accent)' }}>
-          Diffraction Spike Modeler
+          Diffraction Mask Simulator
         </h1>
         <div className="flex items-center gap-2">
           <button onClick={handleExportSVG}

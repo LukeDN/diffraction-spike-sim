@@ -104,95 +104,269 @@ export function exportSVG(params: MaskParams, shapes: AnyShape[]): string {
     return svg;
 }
 
+/**
+ * Build a sector arc path as an array of 2D points [x,y].
+ * Center at (0,0), from startAngle to endAngle (radians), with optional inner radius.
+ */
+function buildSectorPoints(
+    outerR: number,
+    innerR: number,
+    startRad: number,
+    endRad: number,
+    arcSegments = 64,
+): [number, number][] {
+    const pts: [number, number][] = [];
+    const sweep = endRad - startRad;
+
+    if (innerR > 0) {
+        // Outer arc
+        for (let i = 0; i <= arcSegments; i++) {
+            const a = startRad + (i / arcSegments) * sweep;
+            pts.push([Math.cos(a) * outerR, Math.sin(a) * outerR]);
+        }
+        // Inner arc (reverse)
+        for (let i = arcSegments; i >= 0; i--) {
+            const a = startRad + (i / arcSegments) * sweep;
+            pts.push([Math.cos(a) * innerR, Math.sin(a) * innerR]);
+        }
+    } else {
+        pts.push([0, 0]);
+        for (let i = 0; i <= arcSegments; i++) {
+            const a = startRad + (i / arcSegments) * sweep;
+            pts.push([Math.cos(a) * outerR, Math.sin(a) * outerR]);
+        }
+    }
+    return pts;
+}
+
+/**
+ * Sutherland–Hodgman polygon clipping.
+ * Clips `subjectPoly` against the convex-ish polygon `clipPoly`.
+ * For our sector arcs (which aren't strictly convex when >180°), we approximate.
+ * Both polygons are arrays of [x, y].
+ */
+function clipPolygon(subjectPoly: [number, number][], clipPoly: [number, number][]): [number, number][] {
+    let output = [...subjectPoly];
+
+    for (let i = 0; i < clipPoly.length; i++) {
+        if (output.length === 0) return [];
+        const edgeStart = clipPoly[i];
+        const edgeEnd = clipPoly[(i + 1) % clipPoly.length];
+        const input = output;
+        output = [];
+
+        for (let j = 0; j < input.length; j++) {
+            const current = input[j];
+            const prev = input[(j + input.length - 1) % input.length];
+            const currInside = isInside(current, edgeStart, edgeEnd);
+            const prevInside = isInside(prev, edgeStart, edgeEnd);
+
+            if (currInside) {
+                if (!prevInside) {
+                    const inter = lineIntersect(prev, current, edgeStart, edgeEnd);
+                    if (inter) output.push(inter);
+                }
+                output.push(current);
+            } else if (prevInside) {
+                const inter = lineIntersect(prev, current, edgeStart, edgeEnd);
+                if (inter) output.push(inter);
+            }
+        }
+    }
+    return output;
+}
+
+function isInside(pt: [number, number], edgeA: [number, number], edgeB: [number, number]): boolean {
+    return (edgeB[0] - edgeA[0]) * (pt[1] - edgeA[1]) - (edgeB[1] - edgeA[1]) * (pt[0] - edgeA[0]) >= 0;
+}
+
+function lineIntersect(
+    p1: [number, number], p2: [number, number],
+    p3: [number, number], p4: [number, number],
+): [number, number] | null {
+    const d1x = p2[0] - p1[0], d1y = p2[1] - p1[1];
+    const d2x = p4[0] - p3[0], d2y = p4[1] - p3[1];
+    const denom = d1x * d2y - d1y * d2x;
+    if (Math.abs(denom) < 1e-10) return null;
+    const t = ((p3[0] - p1[0]) * d2y - (p3[1] - p1[1]) * d2x) / denom;
+    return [p1[0] + t * d1x, p1[1] + t * d1y];
+}
+
+/**
+ * Clip a rectangular bar polygon to a circular boundary (approximate with polygon).
+ * Returns the clipped polygon points, or empty array if no overlap.
+ */
+function clipToCircle(rectPts: [number, number][], radius: number, circleSegments = 64): [number, number][] {
+    // Approximate circle as polygon
+    const circlePoly: [number, number][] = [];
+    for (let i = 0; i < circleSegments; i++) {
+        const a = (i / circleSegments) * Math.PI * 2;
+        circlePoly.push([Math.cos(a) * radius, Math.sin(a) * radius]);
+    }
+    return clipPolygon(rectPts, circlePoly);
+}
+
 // Generate STL blob
 export function exportSTL(params: MaskParams, shapes: AnyShape[]): string {
     const outerDiameter = params.apertureDiameter + 20;
     const rOuter = outerDiameter / 2;
     const rAperture = params.apertureDiameter / 2;
 
-    // We build the positive solid using CSG or planar shapes
-    const shape = new THREE.Shape();
-    // Outer rim: A circle
-    shape.absarc(0, 0, rOuter, 0, Math.PI * 2, false);
+    // Scale factor: canvas is always 400px, map to physical mm
+    const scale = params.apertureDiameter / 400;
 
-    // The hole is the aperture
+    // Outer rim ring
+    const rimShape = new THREE.Shape();
+    rimShape.absarc(0, 0, rOuter, 0, Math.PI * 2, false);
     const holePath = new THREE.Path();
     holePath.absarc(0, 0, rAperture, 0, Math.PI * 2, true);
-    shape.holes.push(holePath);
+    rimShape.holes.push(holePath);
 
-    // We extrude this outer ring
     const extrudeSettings = { depth: 2, bevelEnabled: false }; // 2mm thick
-    const geometryRing = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-
-    // Now we create the central hub and vanes as separate meshes, and merge them
     const materials = new THREE.MeshBasicMaterial();
-    const ringMesh = new THREE.Mesh(geometryRing, materials);
-
     const scene = new THREE.Scene();
+
+    const ringMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(rimShape, extrudeSettings), materials);
     scene.add(ringMesh);
 
-    shapes.forEach(shape => {
-        const offsetX = shape.x - 200;
-        // In ThreeJS space, Y is up, but canvas Y is down. We must invert Y.
-        const offsetY = -(shape.y - 200);
+    shapes.forEach(s => {
+        // FIX #1: Scale positions from canvas-pixel space (0-400, center 200) to mm space
+        const offsetX = (s.x - 200) * scale;
+        const offsetY = -(s.y - 200) * scale; // Y inverted for ThreeJS
 
-        if (shape.type === 'rectangle') {
-            const shapeRect = new THREE.Shape();
-            shapeRect.moveTo(-shape.width / 2, -shape.height / 2);
-            shapeRect.lineTo(shape.width / 2, -shape.height / 2);
-            shapeRect.lineTo(shape.width / 2, shape.height / 2);
-            shapeRect.lineTo(-shape.width / 2, shape.height / 2);
-            shapeRect.lineTo(-shape.width / 2, -shape.height / 2);
+        if (s.type === 'rectangle') {
+            // FIX #1: Scale dimensions too
+            const w = s.width * scale;
+            const h = s.height * scale;
 
-            const geometryRect = new THREE.ExtrudeGeometry(shapeRect, extrudeSettings);
-            const meshRect = new THREE.Mesh(geometryRect, materials);
-            meshRect.position.set(offsetX, offsetY, 0);
-            // Rotation in canvas is clockwise around Z, in ThreeJS it's counter-clockwise
-            meshRect.rotation.z = -shape.rotation * Math.PI / 180;
-            scene.add(meshRect);
+            const rectShape = new THREE.Shape();
+            rectShape.moveTo(-w / 2, -h / 2);
+            rectShape.lineTo(w / 2, -h / 2);
+            rectShape.lineTo(w / 2, h / 2);
+            rectShape.lineTo(-w / 2, h / 2);
+            rectShape.lineTo(-w / 2, -h / 2);
 
-        } else if (shape.type === 'wavy') {
-            // simplified to rectangle for STL as well for now
-            const shapeRect = new THREE.Shape();
-            shapeRect.moveTo(0, -shape.thickness / 2);
-            shapeRect.lineTo(shape.length, -shape.thickness / 2);
-            shapeRect.lineTo(shape.length, shape.thickness / 2);
-            shapeRect.lineTo(0, shape.thickness / 2);
-            shapeRect.lineTo(0, -shape.thickness / 2);
-            const geometryRect = new THREE.ExtrudeGeometry(shapeRect, extrudeSettings);
-            const meshRect = new THREE.Mesh(geometryRect, materials);
-            meshRect.position.set(offsetX, offsetY, 0);
-            meshRect.rotation.z = -shape.rotation * Math.PI / 180;
-            scene.add(meshRect);
+            const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(rectShape, extrudeSettings), materials);
+            mesh.position.set(offsetX, offsetY, 0);
+            mesh.rotation.z = -s.rotation * Math.PI / 180;
+            scene.add(mesh);
 
-        } else if (shape.type === 'gratingSector') {
-            // Generate extruded bars within sector bounds
-            const gAngleRad = (shape.gratingAngle * Math.PI) / 180;
-            const pitch = shape.slitWidth + shape.barWidth;
+        } else if (s.type === 'wavy') {
+            // FIX #5: Generate actual sinusoidal wavy shape instead of flat rectangle
+            const W = s.length * scale;
+            const A = s.amplitude * scale;
+            const F = s.frequency;
+            const T = s.thickness * scale;
+            const steps = Math.max(100, Math.ceil(W));
+
+            const wavyShape = new THREE.Shape();
+
+            // Top edge (left to right)
+            for (let i = 0; i <= steps; i++) {
+                const xPos = -W / 2 + (i / steps) * W;
+                const yOffset = Math.sin((i / steps) * Math.PI * 2 * F) * A;
+                if (i === 0) wavyShape.moveTo(xPos, yOffset - T / 2);
+                else wavyShape.lineTo(xPos, yOffset - T / 2);
+            }
+            // Bottom edge (right to left)
+            for (let i = steps; i >= 0; i--) {
+                const xPos = -W / 2 + (i / steps) * W;
+                const yOffset = Math.sin((i / steps) * Math.PI * 2 * F) * A;
+                wavyShape.lineTo(xPos, yOffset + T / 2);
+            }
+            wavyShape.closePath();
+
+            const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(wavyShape, extrudeSettings), materials);
+            mesh.position.set(offsetX, offsetY, 0);
+            mesh.rotation.z = -s.rotation * Math.PI / 180;
+            scene.add(mesh);
+
+        } else if (s.type === 'gratingSector') {
+            // FIX #3 & #4: Clip bars to sector arc shape & fix offset axis
+            const gAngleRad = (s.gratingAngle * Math.PI) / 180;
+            const pitch = s.slitWidth + s.barWidth;
             const span = rAperture * 2 + 20;
             const numBars = Math.ceil(span / pitch) + 1;
 
+            const startRad = (s.sectorStartAngle * Math.PI) / 180;
+            const endRad = (s.sectorEndAngle * Math.PI) / 180;
+
+            // Build sector polygon for clipping (in aperture mm space, centered at 0,0)
+            const sectorPts = buildSectorPoints(rAperture, s.innerRadius, startRad, endRad);
+
+            // FIX #4: perpendicular to grating angle for bar spacing
+            const perpX = -Math.sin(gAngleRad);
+            const perpY = Math.cos(gAngleRad);
+            // Along grating angle for bar length direction
+            const alongX = Math.cos(gAngleRad);
+            const alongY = Math.sin(gAngleRad);
+
             for (let i = -numBars; i <= numBars; i++) {
                 const barOffset = i * pitch;
+                // Bar center position: offset perpendicular to grating angle
+                const cx = barOffset * perpX;
+                const cy = barOffset * perpY;
+
+                // Build bar rectangle corners in world space
+                const hw = s.barWidth / 2;
+                const hl = span / 2;
+                const barRect: [number, number][] = [
+                    [cx - alongX * hl - perpX * hw, cy - alongY * hl - perpY * hw],
+                    [cx + alongX * hl - perpX * hw, cy + alongY * hl - perpY * hw],
+                    [cx + alongX * hl + perpX * hw, cy + alongY * hl + perpY * hw],
+                    [cx - alongX * hl + perpX * hw, cy - alongY * hl + perpY * hw],
+                ];
+
+                // FIX #3: Clip bar to sector boundary
+                let clipped = clipPolygon(barRect, sectorPts);
+                if (clipped.length < 3) continue;
+
+                // Also clip to aperture circle
+                clipped = clipToCircle(clipped, rAperture);
+                if (clipped.length < 3) continue;
+
+                // Build THREE.Shape from clipped polygon
                 const barShape = new THREE.Shape();
-                barShape.moveTo(-shape.barWidth / 2, -span / 2);
-                barShape.lineTo(shape.barWidth / 2, -span / 2);
-                barShape.lineTo(shape.barWidth / 2, span / 2);
-                barShape.lineTo(-shape.barWidth / 2, span / 2);
-                barShape.lineTo(-shape.barWidth / 2, -span / 2);
+                barShape.moveTo(clipped[0][0], clipped[0][1]);
+                for (let j = 1; j < clipped.length; j++) {
+                    barShape.lineTo(clipped[j][0], clipped[j][1]);
+                }
+                barShape.closePath();
+
                 const barGeo = new THREE.ExtrudeGeometry(barShape, extrudeSettings);
                 const barMesh = new THREE.Mesh(barGeo, materials);
-                barMesh.position.set(
-                    barOffset * Math.cos(gAngleRad),
-                    barOffset * Math.sin(gAngleRad),
-                    0
-                );
-                barMesh.rotation.z = gAngleRad;
                 scene.add(barMesh);
             }
         }
     });
 
+    // FIX #2: Export obstruction geometry
+    const obs = params.obstruction;
+    if (obs.enabled) {
+        if (obs.style === 'filled') {
+            // Filled central disk
+            const diskShape = new THREE.Shape();
+            diskShape.absarc(0, 0, obs.startRadius, 0, Math.PI * 2, false);
+            const diskMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(diskShape, extrudeSettings), materials);
+            scene.add(diskMesh);
+        }
+
+        // Additional rings (annuli)
+        for (let ring = (obs.style === 'filled' ? 1 : 0); ring < obs.ringCount; ring++) {
+            const r = obs.startRadius + ring * obs.ringSpacing;
+            const ringOuter = r + obs.ringThickness / 2;
+            const ringInner = Math.max(0, r - obs.ringThickness / 2);
+
+            const annulusShape = new THREE.Shape();
+            annulusShape.absarc(0, 0, ringOuter, 0, Math.PI * 2, false);
+            const innerHole = new THREE.Path();
+            innerHole.absarc(0, 0, ringInner, 0, Math.PI * 2, true);
+            annulusShape.holes.push(innerHole);
+
+            const annulusMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(annulusShape, extrudeSettings), materials);
+            scene.add(annulusMesh);
+        }
+    }
 
     const exporter = new STLExporter();
     const stlString = exporter.parse(scene);
