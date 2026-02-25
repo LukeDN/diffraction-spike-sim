@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { AnyShape, ShapeType, PresetId } from '../types/shapes';
 import type { MaskParams } from '../App';
-import { Trash2, Plus, ChevronRight, Sparkles, Circle, Target, Waves, Grid3x3 } from 'lucide-react';
+import { Trash2, Plus, ChevronRight, Sparkles, Circle, Target, Waves, Grid3x3, Copy } from 'lucide-react';
 import { PRESETS, PRESET_ORDER } from '../lib/presets';
 
 interface Props {
@@ -63,6 +63,18 @@ export function ParametricMaskBuilder({ params, onChange, shapes, onShapesChange
         onShapesChange(shapes.filter(s => s.id !== id));
     };
 
+    const duplicateShape = (id: string) => {
+        setActivePreset(null);
+        const source = shapes.find(s => s.id === id);
+        if (!source) return;
+        const clone = {
+            ...source,
+            id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+            rotation: (source.rotation + 15) % 360,
+        } as AnyShape;
+        onShapesChange([...shapes, clone]);
+    };
+
     const toggleCollapse = (id: string) => {
         setCollapsedVanes(prev => {
             const next = new Set(prev);
@@ -101,26 +113,32 @@ export function ParametricMaskBuilder({ params, onChange, shapes, onShapesChange
                 </div>
             </Section>
 
-            {/* ── Global ── */}
-            <Section icon={<Circle size={12} />} title="Aperture">
-                <SliderRow
-                    label="Diameter"
-                    value={params.apertureDiameter}
-                    min={50} max={400} step={1} unit="mm"
-                    ticks={[50, 100, 150, 200, 250, 300, 350, 400]}
-                    onChange={v => onChange({ ...params, apertureDiameter: v })}
-                />
-                <div className="mt-3">
-                    <div className="text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>Color Style</div>
+            {/* ── Simulation Settings ── */}
+            <Section icon={<Circle size={12} />} title="Simulation">
+                <div>
+                    <div className="text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>Simulation Mode</div>
                     <SegmentedControl
                         options={[
-                            { value: 'angular', label: 'Angular (Classic)' },
-                            { value: 'longitudinal', label: 'Longitudinal (Webb)' },
+                            { value: 'analytical', label: 'Analytical' },
+                            { value: 'fft', label: 'FFT (Physical)' },
                         ]}
-                        value={params.colorStyle || 'longitudinal'}
-                        onChange={v => onChange({ ...params, colorStyle: v as 'angular' | 'longitudinal' })}
+                        value={params.simulationMode || 'analytical'}
+                        onChange={v => onChange({ ...params, simulationMode: v as 'analytical' | 'fft' })}
                     />
                 </div>
+                {(params.simulationMode || 'analytical') === 'analytical' && (
+                    <div className="mt-3 animate-in">
+                        <div className="text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>Color Style</div>
+                        <SegmentedControl
+                            options={[
+                                { value: 'angular', label: 'Angular (Classic)' },
+                                { value: 'longitudinal', label: 'Longitudinal (Webb)' },
+                            ]}
+                            value={params.colorStyle || 'longitudinal'}
+                            onChange={v => onChange({ ...params, colorStyle: v as 'angular' | 'longitudinal' })}
+                        />
+                    </div>
+                )}
             </Section>
 
             {/* ── Center Obstruction ── */}
@@ -215,11 +233,22 @@ export function ParametricMaskBuilder({ params, onChange, shapes, onShapesChange
                                                 : `${shape.rotation}°`}
                                         </span>
                                         <button
+                                            onClick={(e) => { e.stopPropagation(); duplicateShape(shape.id); }}
+                                            className="p-0.5 rounded transition-colors"
+                                            style={{ color: 'var(--text-muted)' }}
+                                            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-accent)'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+                                            title="Duplicate"
+                                        >
+                                            <Copy size={11} />
+                                        </button>
+                                        <button
                                             onClick={(e) => { e.stopPropagation(); removeShape(shape.id); }}
                                             className="p-0.5 rounded transition-colors"
                                             style={{ color: 'var(--text-muted)' }}
                                             onMouseEnter={e => { e.currentTarget.style.color = 'var(--danger)'; }}
                                             onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+                                            title="Delete"
                                         >
                                             <Trash2 size={11} />
                                         </button>

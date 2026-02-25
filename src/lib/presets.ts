@@ -17,6 +17,19 @@ function makeVane(id: string, angle: number, length = 400, thickness = 5): AnySh
     };
 }
 
+function makeHalfVane(id: string, angle: number, innerR: number, outerR = 200, thickness = 3): AnyShape {
+    const length = outerR - innerR;
+    const midR = innerR + length / 2;
+    const rad = angle * Math.PI / 180;
+    const cx = 200 + midR * Math.cos(rad);
+    const cy = 200 + midR * Math.sin(rad);
+    return {
+        id, type: 'rectangle',
+        x: cx, y: cy, width: length, height: thickness,
+        fill: 'black', rotation: angle, scaleX: 1, scaleY: 1,
+    };
+}
+
 function makeWavy(id: string, angle: number, amp = 15, freq = 3): AnyShape {
     return {
         id, type: 'wavy',
@@ -48,7 +61,7 @@ function makeGratingSector(
     };
 }
 
-export const PRESETS: Record<PresetId, Preset> = {
+export const PRESETS: Record<string, Preset> = {
     blank: {
         id: 'blank',
         label: 'Blank',
@@ -81,43 +94,68 @@ export const PRESETS: Record<PresetId, Preset> = {
         apertureDiameter: 400,
     },
     // ── Bahtinov Mask ──
-    // 3 sectors: top half = vertical grating, bottom-left = +20° angled, bottom-right = -20° angled
-    // Angles are in standard math convention: 0°=right, 90°=down on canvas (measured CW)
+    // 3 sectors: top half = vertical grating, bottom-left = +20°, bottom-right = -20°
+    // Structural ribs at sector boundaries prevent floating pieces
     bahtinov: {
         id: 'bahtinov',
         label: 'Bahtinov',
         description: 'Focus-aid: 3 grating sectors (vertical + ±20°)',
         shapes: [
-            // Top half: vertical gratings (slit lines at 0° = vertical)
+            // Top half: vertical gratings
             makeGratingSector('bt', 180, 360, 0, 8, 5, 0),
             // Bottom-left: grating angled at +20°
             makeGratingSector('bl', 90, 180, 20, 8, 5, 0),
             // Bottom-right: grating angled at -20°
             makeGratingSector('br', 0, 90, -20, 8, 5, 0),
+            // Structural rib: horizontal bar separating top/bottom halves
+            makeVane('bh', 0, 400, 3),
+            // Structural rib: vertical half-bar separating bottom-left/bottom-right
+            makeHalfVane('bv', 90, 0, 200, 3),
         ],
         obstruction: { ...defaultObstruction, enabled: false },
         apertureDiameter: 400,
     },
 
     // ── Tri-Bahtinov Mask ──
-    // 6 sectors × 60°, 3 grating orientations (each used twice in opposing sectors)
-    // Center hole (innerRadius ~80mm)
+    // 3 complete independent Bahtinov patterns, each taking up a 120° wedge.
+    // Each wedge has 3 sectors (one straight, two angled) just like a normal Bahtinov.
+    // Radial ribs at every sector boundary + inner support ring form the structure.
     'tri-bahtinov': {
         id: 'tri-bahtinov',
         label: 'Tri-Bahtinov',
-        description: 'Focus-aid: 6 sectors, 3 grating angles, open center',
+        description: 'Focus & collimation aid: 3 independent Bahtinovs at 120°',
         shapes: [
-            // 0° grating orientation — sectors at 0° and 180°
-            makeGratingSector('tb-a1', 0, 60, 0, 10, 6, 75),
-            makeGratingSector('tb-a2', 180, 240, 0, 10, 6, 75),
-            // +30° grating — sectors at 60° and 240°
-            makeGratingSector('tb-b1', 60, 120, 30, 10, 6, 75),
-            makeGratingSector('tb-b2', 240, 300, 30, 10, 6, 75),
-            // -30° grating — sectors at 120° and 300°
-            makeGratingSector('tb-c1', 120, 180, -30, 10, 6, 75),
-            makeGratingSector('tb-c2', 300, 360, -30, 10, 6, 75),
+            // Wedge 1 (30° to 150°, symmetry axis 90°)
+            makeGratingSector('tb-w1-s', 30, 90, 0, 6, 4, 75),     // Straight half
+            makeGratingSector('tb-w1-a1', 90, 120, 20, 6, 4, 75),  // Angled +20
+            makeGratingSector('tb-w1-a2', 120, 150, -20, 6, 4, 75), // Angled -20
+
+            // Wedge 2 (150° to 270°, symmetry axis 210°) -> rotate W1 by +120°
+            makeGratingSector('tb-w2-s', 150, 210, 120, 6, 4, 75),
+            makeGratingSector('tb-w2-a1', 210, 240, 140, 6, 4, 75),
+            makeGratingSector('tb-w2-a2', 240, 270, 100, 6, 4, 75),
+
+            // Wedge 3 (270° to 30°, symmetry axis 330°) -> rotate W1 by +240°
+            makeGratingSector('tb-w3-s', 270, 330, 240, 6, 4, 75),
+            makeGratingSector('tb-w3-a1', 330, 360, 260, 6, 4, 75),
+            makeGratingSector('tb-w3-a2', 0, 30, 220, 6, 4, 75),
+
+            // Structural Radial Ribs (9 total at every sector boundary)
+            makeHalfVane('tb-r1', 0, 75, 200, 3),
+            makeHalfVane('tb-r2', 30, 75, 200, 3),
+            makeHalfVane('tb-r3', 90, 75, 200, 3),
+            makeHalfVane('tb-r4', 120, 75, 200, 3),
+            makeHalfVane('tb-r5', 150, 75, 200, 3),
+            makeHalfVane('tb-r6', 210, 75, 200, 3),
+            makeHalfVane('tb-r7', 240, 75, 200, 3),
+            makeHalfVane('tb-r8', 270, 75, 200, 3),
+            makeHalfVane('tb-r9', 330, 75, 200, 3),
         ],
-        obstruction: { ...defaultObstruction, enabled: false },
+        // Inner support ring at 75mm holds the radial ribs together
+        obstruction: {
+            enabled: true, style: 'hollow' as const, ringCount: 1,
+            startRadius: 75, ringSpacing: 20, ringThickness: 3,
+        },
         apertureDiameter: 400,
     },
 

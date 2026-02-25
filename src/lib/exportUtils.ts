@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
+import makerjs from 'makerjs';
 import type { MaskParams } from '../App';
 import type { AnyShape } from '../types/shapes';
+import { renderStar } from './starRenderer';
 
 // Generate raw SVG string
 export function exportSVG(params: MaskParams, shapes: AnyShape[]): string {
@@ -206,24 +208,22 @@ function clipToCircle(rectPts: [number, number][], radius: number, circleSegment
     return clipPolygon(rectPts, circlePoly);
 }
 
-// Generate STL blob
-export function exportSTL(params: MaskParams, shapes: AnyShape[]): string {
+// Build a Three.js scene of the mask (used by both STL export and 3D preview)
+export function buildMaskScene(params: MaskParams, shapes: AnyShape[], thickness = 2): THREE.Scene {
     const outerDiameter = params.apertureDiameter + 20;
     const rOuter = outerDiameter / 2;
     const rAperture = params.apertureDiameter / 2;
 
-    // Scale factor: canvas is always 400px, map to physical mm
     const scale = params.apertureDiameter / 400;
 
-    // Outer rim ring
     const rimShape = new THREE.Shape();
     rimShape.absarc(0, 0, rOuter, 0, Math.PI * 2, false);
     const holePath = new THREE.Path();
     holePath.absarc(0, 0, rAperture, 0, Math.PI * 2, true);
     rimShape.holes.push(holePath);
 
-    const extrudeSettings = { depth: 2, bevelEnabled: false }; // 2mm thick
-    const materials = new THREE.MeshBasicMaterial();
+    const extrudeSettings = { depth: thickness, bevelEnabled: false };
+    const materials = new THREE.MeshStandardMaterial({ color: 0x8899bb, metalness: 0.3, roughness: 0.7 });
     const scene = new THREE.Scene();
 
     const ringMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(rimShape, extrudeSettings), materials);
@@ -368,13 +368,19 @@ export function exportSTL(params: MaskParams, shapes: AnyShape[]): string {
         }
     }
 
+    return scene;
+}
+
+// Generate STL string from the mask scene
+export function exportSTL(params: MaskParams, shapes: AnyShape[], thickness = 2): string {
+    const scene = buildMaskScene(params, shapes, thickness);
     const exporter = new STLExporter();
     const stlString = exporter.parse(scene);
     return stlString;
 }
 
-export function downloadFile(content: string, filename: string, mimeType: string) {
-    const blob = new Blob([content], { type: mimeType });
+export function downloadFile(content: string | Blob, filename: string, mimeType?: string) {
+    const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -383,4 +389,140 @@ export function downloadFile(content: string, filename: string, mimeType: string
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+// Generate PNG blob from star simulation
+export function exportPNG(
+    params: MaskParams,
+    shapes: AnyShape[],
+    resolution = 1024,
+): Promise<Blob> {
+    const imgData = renderStar(resolution, resolution, params, shapes);
+    const canvas = document.createElement('canvas');
+    canvas.width = resolution;
+    canvas.height = resolution;
+    const ctx = canvas.getContext('2d')!;
+    ctx.putImageData(imgData, 0, 0);
+    return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to create PNG blob'));
+        }, 'image/png');
+    });
+}
+
+// Generate DXF string using makerjs
+export function exportDXF(params: MaskParams, shapes: AnyShape[]): string {
+    const outerDiameter = params.apertureDiameter + 20;
+    const rOuter = outerDiameter / 2;
+    const rAperture = params.apertureDiameter / 2;
+    const scale = params.apertureDiameter / 400;
+
+    const models: Record<string, makerjs.IModel> = {};
+    const paths: Record<string, makerjs.IPath> = {};
+
+    // Outer rim circle
+    paths['outerRim'] = new makerjs.paths.Circle([0, 0], rOuter);
+    // Aperture circle
+    paths['aperture'] = new makerjs.paths.Circle([0, 0], rAperture);
+
+    shapes.forEach((s, idx) => {
+        const offsetX = (s.x - 200) * scale;
+        const offsetY = -(s.y - 200) * scale;
+
+        if (s.type === 'rectangle') {
+            const w = s.width * scale;
+            const h = s.height * scale;
+            const rect = new makerjs.models.Rectangle(w, h);
+            makerjs.model.center(rect);
+            makerjs.model.rotate(rect, -s.rotation, [0, 0]);
+            makerjs.model.move(rect, [offsetX, offsetY]);
+            models[`rect_${idx}`] = rect;
+
+        } else if (s.type === 'wavy') {
+            const W = s.length * scale;
+            const T = s.thickness * scale;
+            const A = s.amplitude * scale;
+            const F = s.frequency;
+            const steps = Math.max(80, Math.ceil(W));
+
+            // Build wavy outline as chain of line segments
+            const topPts: [number, number][] = [];
+            const botPts: [number, number][] = [];
+            for (let i = 0; i <= steps; i++) {
+                const xPos = -W / 2 + (i / steps) * W;
+                const yOff = Math.sin((i / steps) * Math.PI * 2 * F) * A;
+                topPts.push([xPos, yOff - T / 2]);
+                botPts.push([xPos, yOff + T / 2]);
+            }
+            botPts.reverse();
+            const allPts = [...topPts, ...botPts];
+            const wavyPaths: Record<string, makerjs.IPath> = {};
+            for (let i = 0; i < allPts.length; i++) {
+                const next = (i + 1) % allPts.length;
+                wavyPaths[`seg_${i}`] = new makerjs.paths.Line(allPts[i], allPts[next]);
+            }
+            const wavyModel: makerjs.IModel = { paths: wavyPaths };
+            makerjs.model.rotate(wavyModel, -s.rotation, [0, 0]);
+            makerjs.model.move(wavyModel, [offsetX, offsetY]);
+            models[`wavy_${idx}`] = wavyModel;
+
+        } else if (s.type === 'gratingSector') {
+            const gAngleRad = (s.gratingAngle * Math.PI) / 180;
+            const pitch = s.slitWidth + s.barWidth;
+            const span = rAperture * 2 + 20;
+            const numBars = Math.ceil(span / pitch) + 1;
+
+            const perpX = -Math.sin(gAngleRad);
+            const perpY = Math.cos(gAngleRad);
+            const alongX = Math.cos(gAngleRad);
+            const alongY = Math.sin(gAngleRad);
+
+            const startRad = (s.sectorStartAngle * Math.PI) / 180;
+            const endRad = (s.sectorEndAngle * Math.PI) / 180;
+            const sectorPts = buildSectorPoints(rAperture, s.innerRadius, startRad, endRad);
+
+            for (let i = -numBars; i <= numBars; i++) {
+                const barOffset = i * pitch;
+                const cx = barOffset * perpX;
+                const cy = barOffset * perpY;
+                const hw = s.barWidth / 2;
+                const hl = span / 2;
+                const barRect: [number, number][] = [
+                    [cx - alongX * hl - perpX * hw, cy - alongY * hl - perpY * hw],
+                    [cx + alongX * hl - perpX * hw, cy + alongY * hl - perpY * hw],
+                    [cx + alongX * hl + perpX * hw, cy + alongY * hl + perpY * hw],
+                    [cx - alongX * hl + perpX * hw, cy - alongY * hl + perpY * hw],
+                ];
+
+                let clipped = clipPolygon(barRect, sectorPts);
+                if (clipped.length < 3) continue;
+                clipped = clipToCircle(clipped, rAperture);
+                if (clipped.length < 3) continue;
+
+                const barPaths: Record<string, makerjs.IPath> = {};
+                for (let j = 0; j < clipped.length; j++) {
+                    const next = (j + 1) % clipped.length;
+                    barPaths[`seg_${j}`] = new makerjs.paths.Line(clipped[j], clipped[next]);
+                }
+                models[`grating_${idx}_bar_${i}`] = { paths: barPaths };
+            }
+        }
+    });
+
+    // Obstruction
+    const obs = params.obstruction;
+    if (obs.enabled) {
+        if (obs.style === 'filled') {
+            paths['obs_fill'] = new makerjs.paths.Circle([0, 0], obs.startRadius);
+        }
+        for (let ring = (obs.style === 'filled' ? 1 : 0); ring < obs.ringCount; ring++) {
+            const r = obs.startRadius + ring * obs.ringSpacing;
+            paths[`obs_ring_outer_${ring}`] = new makerjs.paths.Circle([0, 0], r + obs.ringThickness / 2);
+            paths[`obs_ring_inner_${ring}`] = new makerjs.paths.Circle([0, 0], Math.max(0.1, r - obs.ringThickness / 2));
+        }
+    }
+
+    const model: makerjs.IModel = { paths, models };
+    return makerjs.exporter.toDXF(model);
 }

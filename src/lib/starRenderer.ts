@@ -220,15 +220,15 @@ export function renderStar(
 
                         if (spike.spread > 0.01) {
                             const halfSpread = spike.spread;
-                            if (Math.abs(angleDiff) < halfSpread) {
-                                const edgeDist = halfSpread - Math.abs(angleDiff);
-                                const edgeTransition = halfSpread * 0.3;
-                                angularIntensity = edgeDist < edgeTransition ? edgeDist / edgeTransition : 1.0;
-                            } else {
-                                const excess = Math.abs(angleDiff) - halfSpread;
-                                angularIntensity = Math.exp(-(excess * excess) / (2 * 0.02 * 0.02));
-                            }
-                            angularIntensity *= 1 / (1 + halfSpread * 5);
+                            const angularWidth = (spike.width / Math.max(r, 1)) * 1.0;
+
+                            // Smooth Gaussian-like transition for the edges of the spread fan
+                            const excess = Math.max(0, Math.abs(angleDiff) - halfSpread * 0.7);
+                            const transitionWidth = halfSpread * 0.3 + angularWidth;
+                            angularIntensity = Math.exp(-(excess * excess) / (2 * transitionWidth * transitionWidth));
+
+                            // Dim the intensity because the energy is spread over a wide area
+                            angularIntensity *= 1 / (1 + halfSpread * 6);
                         } else {
                             const angularWidth = (spike.width / Math.max(r, 1)) * 1.0;
                             angularIntensity = Math.exp(-(angleDiff * angleDiff) / (2 * angularWidth * angularWidth));
@@ -259,15 +259,14 @@ export function renderStar(
 
                         if (spike.spread > 0.01) {
                             const halfSpread = spike.spread;
-                            if (Math.abs(angleDiff) < halfSpread) {
-                                const edgeDist = halfSpread - Math.abs(angleDiff);
-                                const edgeTransition = halfSpread * 0.3;
-                                angularIntensity = edgeDist < edgeTransition ? edgeDist / edgeTransition : 1.0;
-                            } else {
-                                const excess = Math.abs(angleDiff) - halfSpread;
-                                angularIntensity = Math.exp(-(excess * excess) / (2 * 0.02 * 0.02));
-                            }
-                            angularIntensity *= 1 / (1 + halfSpread * 5);
+                            const angularWidth = (spike.width / Math.max(r, 1)) * (wl / 0.53);
+
+                            // Smooth Gaussian-like transition for the spread fan
+                            const excess = Math.max(0, Math.abs(angleDiff) - halfSpread * 0.7);
+                            const transitionWidth = halfSpread * 0.3 + angularWidth;
+                            angularIntensity = Math.exp(-(excess * excess) / (2 * transitionWidth * transitionWidth));
+
+                            angularIntensity *= 1 / (1 + halfSpread * 6);
                         } else {
                             // The angular width scales softly with wavelength
                             const angularWidth = (spike.width / Math.max(r, 1)) * (wl / 0.53);
@@ -301,9 +300,9 @@ export function renderStar(
             finalG = Math.min(1, finalG);
             finalB = Math.min(1, finalB);
 
-            if (finalR < 0.006 && finalG < 0.006 && finalB < 0.006) {
-                finalR = 0; finalG = 0; finalB = 0;
-            }
+            // Remove the 0.006 hard cutoff so spikes softly fade out into the background
+            // finalR = Math.max(0, finalR); etc. handled by clamping and floor
+
 
             const idx = (y * width + x) * 4;
             imgData.data[idx] = Math.floor(finalR * 255);
