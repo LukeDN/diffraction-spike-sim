@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { Download, Sun, Moon, Image, FileText, Box, FileCode, Undo2, Redo2, Share2, Ruler, Rotate3d, Menu, Paintbrush, BookOpen } from 'lucide-react';
 import { exportSVG, exportSTL, exportDXF, exportPNG, downloadFile } from './lib/exportUtils';
@@ -9,7 +9,8 @@ import { PRESETS } from './lib/presets';
 import { useHistory } from './lib/useHistory';
 import { encodeDesign, decodeDesign } from './lib/serialization';
 import { STLPreview } from './components/STLPreview';
-import { LearnPage } from './pages/LearnPage';
+
+const LearnPage = React.lazy(() => import('./pages/LearnPage').then(m => ({ default: m.LearnPage })));
 
 export interface MaskParams {
   apertureDiameter: number;
@@ -24,11 +25,12 @@ const MAX_PANEL_WIDTH = 700;
 function App() {
   const defaultPreset = PRESETS.newtonian;
 
-  // Check URL hash for shared design
+  // Check URL query param for shared design
   const initialState = useMemo(() => {
-    const hash = window.location.hash.slice(1);
-    if (hash) {
-      const decoded = decodeDesign(hash);
+    const searchParams = new URLSearchParams(window.location.search);
+    const designData = searchParams.get('d');
+    if (designData) {
+      const decoded = decodeDesign(designData);
       if (decoded) return { params: decoded.params, shapes: decoded.shapes };
     }
     return {
@@ -39,7 +41,7 @@ function App() {
       },
       shapes: defaultPreset.shapes.map(s => ({ ...s, id: Date.now().toString() + s.id })),
     };
-  }, []);
+  }, [defaultPreset]);
 
   // Undo/redo history wrapping combined state
   const {
@@ -91,6 +93,9 @@ function App() {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
         setShowExportMenu(false);
       }
+      if (navMenuRef.current && !navMenuRef.current.contains(e.target as Node)) {
+        setShowNavMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -111,7 +116,7 @@ function App() {
 
   const handleShare = useCallback(() => {
     const encoded = encodeDesign(params, shapes);
-    const url = `${window.location.origin}${window.location.pathname}#${encoded}`;
+    const url = `${window.location.origin}${window.location.pathname}?d=${encoded}${window.location.hash}`;
     navigator.clipboard.writeText(url).then(() => {
       setShareToast(true);
       setTimeout(() => setShareToast(false), 2000);
@@ -457,7 +462,13 @@ function App() {
           </div>
         } />
         <Route path="/learn" element={
-          <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--bg-app)' }}><LearnPage /></div>
+          <Suspense fallback={
+            <div className="flex-1 flex items-center justify-center" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)' }}>
+              <span className="text-sm">Loading…</span>
+            </div>
+          }>
+            <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--bg-app)' }}><LearnPage /></div>
+          </Suspense>
         } />
       </Routes>
     </div>

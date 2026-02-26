@@ -99,7 +99,7 @@ export function LearnPage() {
                                     <Box size={14} /> 3D Printing (STL)
                                 </h4>
                                 <p className="text-[11px] opacity-80 mb-2">Generates a manifold 3D mesh ready for slicing. The mask is extruded to a user-defined thickness (e.g., 2mm).</p>
-                                <p className="text-[10px] style={{ color: 'var(--text-accent)' }}">Includes an interactive WebGL 3D preview in-app.</p>
+                                <p className="text-[10px]" style={{ color: 'var(--text-accent)' }}>Includes an interactive WebGL 3D preview in-app.</p>
                             </div>
                             <div className="p-3 border rounded-lg" style={{ borderColor: 'var(--border-subtle)' }}>
                                 <h4 className="text-[11px] font-semibold mb-1 flex items-center gap-1" style={{ color: 'var(--text-primary)' }}>
