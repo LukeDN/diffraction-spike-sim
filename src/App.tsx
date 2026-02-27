@@ -5,7 +5,7 @@ import { exportSVG, exportSTL, exportDXF, exportPNG, downloadFile } from './lib/
 import { StarSimulator } from './components/StarSimulator';
 import { ParametricMaskBuilder } from './components/ParametricMaskBuilder';
 import type { AnyShape, ObstructionConfig } from './types/shapes';
-import { PRESETS } from './lib/presets';
+import { PRESETS, PRESET_ORDER } from './lib/presets';
 import { useHistory } from './lib/useHistory';
 import { encodeDesign, decodeDesign } from './lib/serialization';
 import { STLPreview } from './components/STLPreview';
@@ -75,6 +75,7 @@ function App() {
   const [maskZoom, setMaskZoom] = useState(1);
   const [starZoom, setStarZoom] = useState(1);
   const [showNavMenu, setShowNavMenu] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const navMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -101,13 +102,77 @@ function App() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  // Keyboard shortcuts for undo/redo
+  // Demo Mode
+  useEffect(() => {
+    if (!demoMode) return;
+
+    let currentIndex = 0;
+    const interval = setInterval(() => {
+      currentIndex = (currentIndex + 1) % PRESET_ORDER.length;
+      const presetId = PRESET_ORDER[currentIndex];
+      const preset = PRESETS[presetId];
+      if (preset) {
+        setDesignState(prev => {
+          const simMode = Math.random() > 0.5 ? 'analytical' : 'fft';
+
+          const obs = preset.obstruction;
+          const randObs = { ...obs };
+          if (obs.enabled) {
+            randObs.ringCount = Math.floor(Math.random() * 4) + 1;
+            randObs.ringSpacing = 10 + Math.random() * 30;
+            randObs.ringThickness = 2 + Math.random() * 8;
+            randObs.startRadius = obs.startRadius * (0.8 + Math.random() * 0.4);
+          }
+
+          return {
+            ...prev,
+            params: {
+              ...prev.params,
+              apertureDiameter: preset.apertureDiameter,
+              obstruction: randObs,
+              simulationMode: simMode
+            },
+            shapes: preset.shapes.map(s => {
+              const baseParams = { ...s, id: Date.now().toString() + s.id };
+
+              if (s.type === 'rectangle') {
+                return { ...baseParams, height: Math.max(1, s.height * (0.5 + Math.random() * 1.5)) };
+              } else if (s.type === 'wavy') {
+                return {
+                  ...baseParams,
+                  thickness: Math.max(1, s.thickness * (0.5 + Math.random() * 1.5)),
+                  amplitude: s.amplitude * (0.5 + Math.random() * 1.5),
+                  frequency: s.frequency * (0.5 + Math.random() * 1.5)
+                };
+              } else if (s.type === 'gratingSector') {
+                return {
+                  ...baseParams,
+                  slitWidth: Math.max(2, s.slitWidth * (0.5 + Math.random() * 1.5)),
+                  barWidth: Math.max(2, s.barWidth * (0.5 + Math.random() * 1.5))
+                };
+              }
+
+              return baseParams;
+            })
+          };
+        });
+      }
+    }, 800); // 1.2s -> 800ms
+
+    return () => clearInterval(interval);
+  }, [demoMode, setDesignState]);
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
+      }
+      if (e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setDemoMode(v => !v);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
@@ -235,7 +300,7 @@ function App() {
           <h1 className="text-sm font-bold tracking-tight cursor-pointer"
             style={{ color: 'var(--text-accent)' }}
             onClick={() => navigate('/')}>
-            Diffraction Spike Modeler
+            Diffraction Spike Simulator
           </h1>
         </div>
         <div className="flex items-center gap-2">
